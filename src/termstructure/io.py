@@ -1,11 +1,21 @@
 """Query layer for processed Treasury data."""
 
-import duckdb
 import pandas as pd
 from pathlib import Path
 
 _PROCESSED = Path(__file__).resolve().parents[2] / "data/processed"
 _BONDS_PATH = _PROCESSED / "treasury_bonds.parquet"
+
+# loaded once per Python session; all date lookups filter this in-memory
+_BONDS_DF: pd.DataFrame | None = None
+
+
+def _get_bonds_df() -> pd.DataFrame:
+    global _BONDS_DF
+    if _BONDS_DF is None:
+        _BONDS_DF = pd.read_parquet(_BONDS_PATH)
+        _BONDS_DF["date"] = pd.to_datetime(_BONDS_DF["date"])
+    return _BONDS_DF
 
 
 def load_bonds_for_date(date: str) -> pd.DataFrame:
@@ -19,7 +29,6 @@ def load_bonds_for_date(date: str) -> pd.DataFrame:
         sveny01 ... sveny30]. Empty DataFrame if the date has no data (holiday,
         weekend, or before 1961-06-14).
     """
-    result = duckdb.sql(
-        f"SELECT * FROM read_parquet('{_BONDS_PATH.as_posix()}') WHERE date = '{date}'"
-    ).df()
-    return result
+    df = _get_bonds_df()
+    mask = df["date"] == pd.Timestamp(date)
+    return df[mask].reset_index(drop=True)
