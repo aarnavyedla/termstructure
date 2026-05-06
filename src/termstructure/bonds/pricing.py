@@ -33,3 +33,31 @@ def ytm_from_price(
     """Yield-to-maturity implied by an observed price, solved via bisection."""
     objective = lambda y: price_from_ytm(coupon, maturity_years, y, freq, face) - price
     return brentq(objective, 1e-4, 0.30)
+
+
+def modified_duration(
+    coupon: float,
+    maturity_years: float,
+    ytm: float,
+    freq: int = 2,
+    face: float = 100.0,
+    bump: float = 1e-4,
+) -> float:
+    """Modified duration via symmetric 1bp numerical bump."""
+    p_up   = price_from_ytm(coupon, maturity_years, ytm + bump, freq, face)
+    p_down = price_from_ytm(coupon, maturity_years, ytm - bump, freq, face)
+    p      = price_from_ytm(coupon, maturity_years, ytm,        freq, face)
+    return (p_down - p_up) / (2 * p * bump)
+
+
+def dv01(
+    coupon: float,
+    maturity_years: float,
+    ytm: float,
+    freq: int = 2,
+    face: float = 100.0,
+) -> float:
+    """Dollar value of a basis point: price change for a 1bp yield move."""
+    md = modified_duration(coupon, maturity_years, ytm, freq, face)
+    p  = price_from_ytm(coupon, maturity_years, ytm, freq, face)
+    return md * p * 1e-4
