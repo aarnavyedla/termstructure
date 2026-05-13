@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 from scipy.optimize import least_squares
 
 
@@ -73,3 +74,36 @@ def fit_svensson(
 
     result = least_squares(residuals, x0, method='trf', bounds=bounds)
     return result.x
+
+
+def filter_bonds_for_fitting(bonds_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Apply GSW exclusion rules to a bond universe before Svensson fitting.
+
+    Drops:
+    - TIPS: real yields, incompatible with a nominal curve
+    - Bills: maturity_years < 1, different pricing convention
+    - Callable bonds: embedded option inflates observed yield
+    - Bonds with < 90 days to maturity: trade as near-cash
+    - On-the-run bonds: liquidity premium suppresses their yield
+    - First off-the-run bonds: residual richness bias
+
+    Expected columns in bonds_df:
+        type               str  'bill', 'note', 'bond', or 'tips'
+        maturity_years     float
+        days_to_maturity   int
+        callable           bool
+        on_the_run         bool
+        first_off_the_run  bool
+
+    Returns a copy of the filtered rows.
+    """
+    mask = (
+        (bonds_df["type"] != "tips")
+        & (bonds_df["maturity_years"] >= 1.0)
+        & (~bonds_df["callable"])
+        & (bonds_df["days_to_maturity"] >= 90)
+        & (~bonds_df["on_the_run"])
+        & (~bonds_df["first_off_the_run"])
+    )
+    return bonds_df[mask].copy()
