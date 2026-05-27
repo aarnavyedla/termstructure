@@ -201,3 +201,71 @@ def fit_svensson_daily(
     result.to_parquet(parquet_out, index=False)
     print(f"Done. Saved {len(result):,} rows → {parquet_out}")
     return result
+
+
+def validate_svensson_daily(
+    maturities: list[int] | None = None,
+) -> pd.DataFrame:
+    """
+    Compare our fitted Svensson zero rates against the Fed's published GSW rates.
+
+    Loads svensson_params.parquet (our fits) and treasury_bonds.parquet
+    (Fed's sveny01–sveny30 zero yields), then for each common date and each
+    maturity computes:
+        our_rate = svensson_zero_rate(mat, *our_params)  [decimal]
+        fed_rate = svenyXX / 100                         [decimal]
+        diff_bps = (our_rate - fed_rate) * 10_000
+
+    Args:
+        maturities: integer years 1–30. Defaults to [2, 5, 10, 30].
+
+    Returns:
+        DataFrame with columns: date, maturity, our_rate, fed_rate, diff_bps.
+        Saved to data/processed/svensson_validation.parquet.
+    """
+    from pathlib import Path
+
+    if maturities is None:
+        maturities = [2, 5, 10, 30]
+
+    params_path = Path(__file__).resolve().parents[3] / "data/processed/svensson_params.parquet"
+    bonds_path  = Path(__file__).resolve().parents[3] / "data/processed/treasury_bonds.parquet"
+    out_path    = Path(__file__).resolve().parents[3] / "data/processed/svensson_validation.parquet"
+
+    our = pd.read_parquet(params_path)
+    our["date"] = pd.to_datetime(our["date"])
+    our = our.set_index("date")
+
+    fed = pd.read_parquet(bonds_path)
+    fed["date"] = pd.to_datetime(fed["date"])
+    fed = fed.set_index("date").sort_index()
+
+    common = our.index.intersection(fed.index)
+    param_cols = ["beta0", "beta1", "beta2", "beta3", "lambda1", "lambda2"]
+
+    records: list[dict] = []
+    for mat in maturities:
+        col = f"sveny{mat:02d}"
+        valid = ~fed.loc[common, col].isna()
+        dates = common[valid]
+        if len(dates) == 0:
+            continue
+
+        fed_rates = fed.loc[dates, col].to_numpy() / 100.0
+        our_sub   = our.loc[dates, param_cols].to_numpy()
+        our_rates = np.array([svensson_zero_rate(float(mat), *row) for row in our_sub])
+        diff_bps  = (our_rates - fed_rates) * 10_000
+
+        for date, our_r, fed_r, diff in zip(dates, our_rates, fed_rates, diff_bps):
+            records.append({
+                "date":     date,
+                "maturity": mat,
+                "our_rate": our_r,
+                "fed_rate": fed_r,
+                "diff_bps": diff,
+            })
+
+    result = pd.DataFrame(records)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    result.to_parquet(out_path, index=False)
+    return result

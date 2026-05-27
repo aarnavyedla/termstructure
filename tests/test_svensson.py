@@ -11,6 +11,7 @@ from src.termstructure.curves.svensson import (
     fit_svensson,
     fit_svensson_daily,
     svensson_zero_rate,
+    validate_svensson_daily,
 )
 
 
@@ -182,7 +183,8 @@ def test_fit_svensson_warm_start_matches_cold():
 # fit_svensson_daily — integration tests (skip if parquet not on disk)
 # ---------------------------------------------------------------------------
 
-_PARQUET = Path("data/processed/treasury_bonds.parquet")
+_PARQUET          = Path("data/processed/treasury_bonds.parquet")
+_SVENSSON_PARAMS  = Path("data/processed/svensson_params.parquet")
 
 
 @pytest.mark.skipif(not _PARQUET.exists(), reason="treasury_bonds.parquet not on disk")
@@ -220,3 +222,38 @@ def test_fit_svensson_daily_saves_parquet(tmp_path, monkeypatch):
     assert out.exists()
     on_disk = pd.read_parquet(out)
     assert len(on_disk) >= 1
+
+
+# ---------------------------------------------------------------------------
+# validate_svensson_daily — curve-level comparison against Fed's sveny rates
+# ---------------------------------------------------------------------------
+
+_BOTH_PARQUETS = _PARQUET.exists() and _SVENSSON_PARAMS.exists()
+
+
+@pytest.mark.skipif(not _BOTH_PARQUETS, reason="svensson_params.parquet or treasury_bonds.parquet not on disk")
+def test_validate_svensson_daily_schema():
+    """Output must have required columns and plausible row count."""
+    result = validate_svensson_daily(maturities=[10])
+    required = {"date", "maturity", "our_rate", "fed_rate", "diff_bps"}
+    assert required.issubset(set(result.columns))
+    assert (result["maturity"] == 10).all()
+    assert len(result) > 1000
+
+
+@pytest.mark.skipif(not _BOTH_PARQUETS, reason="svensson_params.parquet or treasury_bonds.parquet not on disk")
+def test_validate_svensson_daily_2bp_target():
+    """95%+ of 10Y days must be within 2bp — the Week 3 Day 5 target."""
+    result = validate_svensson_daily(maturities=[10])
+    within_2bp = (result["diff_bps"].abs() < 2.0).mean()
+    assert within_2bp >= 0.95, f"Only {within_2bp:.1%} of days within 2bp (target: 95%)"
+
+
+@pytest.mark.skipif(not _BOTH_PARQUETS, reason="svensson_params.parquet or treasury_bonds.parquet not on disk")
+def test_validate_svensson_daily_multi_maturity():
+    """All standard maturities must have 90%+ of days within 5bp."""
+    result = validate_svensson_daily(maturities=[2, 5, 10, 30])
+    for mat in [2, 5, 10, 30]:
+        sub = result[result["maturity"] == mat]
+        within_5bp = (sub["diff_bps"].abs() < 5.0).mean()
+        assert within_5bp >= 0.90, f"{mat}Y: only {within_5bp:.1%} within 5bp"
