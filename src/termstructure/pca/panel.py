@@ -1,9 +1,11 @@
 import numpy as np
 import pandas as pd
 
-from termstructure.curves.svensson import svensson_zero_rate
-
-DEFAULT_MATURITIES = [0.25, 0.5, 1, 2, 3, 5, 7, 10, 20, 30]
+# Only integer maturities covered by the Fed's sveny columns.
+# Sub-1Y maturities (0.25, 0.5) are Svensson extrapolations with no bond
+# observations to anchor them — their day-to-day noise from parameter
+# instability distorts the PCA covariance structure.
+DEFAULT_MATURITIES = [1, 2, 3, 5, 7, 10, 20, 30]
 
 
 def _col(mat: float) -> str:
@@ -12,17 +14,18 @@ def _col(mat: float) -> str:
 
 
 def build_zero_panel(
-    maturities: list[float] | None = None,
+    maturities: list[int] | None = None,
 ) -> pd.DataFrame:
     """
-    Build a panel of Svensson zero rates and their daily changes.
+    Build a panel of zero rates and their daily changes.
 
-    Loads svensson_params.parquet, evaluates the fitted curve at each maturity
-    for every date, then first-differences to get daily bp changes.
+    Reads the Fed's published sveny columns from treasury_bonds.parquet
+    directly — not from our Svensson fit. This avoids parameter-instability
+    noise that corrupts the PCA covariance structure.
 
     Args:
-        maturities: maturities in years. Defaults to
-                    [0.25, 0.5, 1, 2, 3, 5, 7, 10, 20, 30].
+        maturities: integer maturities in years (1–30). Defaults to
+                    [1, 2, 3, 5, 7, 10, 20, 30].
 
     Returns:
         DataFrame with columns:
@@ -36,29 +39,30 @@ def build_zero_panel(
     if maturities is None:
         maturities = DEFAULT_MATURITIES
 
-    params_path = Path(__file__).resolve().parents[3] / "data/processed/svensson_params.parquet"
-    out_path    = Path(__file__).resolve().parents[3] / "data/processed/zero_panel.parquet"
+    bonds_path = Path(__file__).resolve().parents[3] / "data/processed/treasury_bonds.parquet"
+    out_path   = Path(__file__).resolve().parents[3] / "data/processed/zero_panel.parquet"
 
-    params_df = pd.read_parquet(params_path)
-    params_df["date"] = pd.to_datetime(params_df["date"])
-    params_df = params_df.sort_values("date").reset_index(drop=True)
+    df = pd.read_parquet(bonds_path)
+    df["date"] = pd.to_datetime(df["date"])
+    df = df.sort_values("date").reset_index(drop=True)
 
-    param_cols = ["beta0", "beta1", "beta2", "beta3", "lambda1", "lambda2"]
-    mats_arr   = np.array(maturities, dtype=float)
-    params_arr = params_df[param_cols].to_numpy()
+    sveny_cols = [f"sveny{int(m):02d}" for m in maturities]
+    rates = df[sveny_cols].to_numpy(dtype=float) / 100.0  # percent → decimal
 
-    # shape (n_dates, n_maturities) — evaluate all maturities at once per date
-    rates = np.array([svensson_zero_rate(mats_arr, *row) for row in params_arr])
+    # Drop dates where any maturity is missing (sparse early history)
+    valid = ~np.isnan(rates).any(axis=1)
+    rates = rates[valid]
+    dates = df["date"].to_numpy()[valid]
 
-    # first differences in bp; NaN on first row
+    # First differences in bp; NaN on first row
     changes = np.vstack([
         np.full((1, len(maturities)), np.nan),
         np.diff(rates, axis=0) * 10_000,
     ])
 
-    result = pd.DataFrame({"date": params_df["date"]})
+    result = pd.DataFrame({"date": dates})
     for i, mat in enumerate(maturities):
-        label = _col(mat)
+        label = _col(float(mat))
         result[f"y_{label}"]  = rates[:, i]
         result[f"dy_{label}"] = changes[:, i]
 
