@@ -1,4 +1,6 @@
-"""Week 3 Day 3 tests: GSW exclusion rules and Svensson fit quality."""
+"""Week 3 tests: GSW exclusion rules, Svensson fit quality, daily loop."""
+
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -7,6 +9,7 @@ import pytest
 from src.termstructure.curves.svensson import (
     filter_bonds_for_fitting,
     fit_svensson,
+    fit_svensson_daily,
     svensson_zero_rate,
 )
 
@@ -153,3 +156,67 @@ def test_fit_upward_curve_has_positive_slope():
     long_rate = svensson_zero_rate(30.0, *fitted_params)
 
     assert long_rate > short_rate
+
+
+def test_fit_svensson_warm_start_matches_cold():
+    """
+    Warm start (x0 = true params) must converge to the same curve as a cold
+    start. Parameters may differ (Svensson is ill-conditioned), but RMSE must
+    be equally small.
+    """
+    params_true = [0.04, -0.01, 0.02, 0.01, 2.0, 5.0]
+    maturities = np.array([1, 2, 3, 5, 7, 10, 15, 20, 30], dtype=float)
+    yields = svensson_zero_rate(maturities, *params_true)
+
+    cold = fit_svensson(maturities, yields)
+    warm = fit_svensson(maturities, yields, x0=params_true)
+
+    rmse_cold = np.sqrt(np.mean((svensson_zero_rate(maturities, *cold) - yields) ** 2)) * 10_000
+    rmse_warm = np.sqrt(np.mean((svensson_zero_rate(maturities, *warm) - yields) ** 2)) * 10_000
+
+    assert rmse_cold < 1.0
+    assert rmse_warm < 1.0
+
+
+# ---------------------------------------------------------------------------
+# fit_svensson_daily — integration tests (skip if parquet not on disk)
+# ---------------------------------------------------------------------------
+
+_PARQUET = Path("data/processed/treasury_bonds.parquet")
+
+
+@pytest.mark.skipif(not _PARQUET.exists(), reason="treasury_bonds.parquet not on disk")
+def test_fit_svensson_daily_schema():
+    """Output must have all required columns and correct dtypes."""
+    result = fit_svensson_daily("2020-01-02", "2020-01-15")
+
+    required = {"date", "beta0", "beta1", "beta2", "beta3",
+                "lambda1", "lambda2", "rmse_bps", "n_bonds"}
+    assert required.issubset(set(result.columns))
+    assert len(result) >= 9  # ~9 business days in the window
+    assert result["n_bonds"].dtype == int or result["n_bonds"].dtype == np.int64
+
+
+@pytest.mark.skipif(not _PARQUET.exists(), reason="treasury_bonds.parquet not on disk")
+def test_fit_svensson_daily_rmse_plausible():
+    """All RMSE values in a recent window should be under 5 bp."""
+    result = fit_svensson_daily("2023-01-02", "2023-01-31")
+    assert result["rmse_bps"].max() < 5.0
+
+
+@pytest.mark.skipif(not _PARQUET.exists(), reason="treasury_bonds.parquet not on disk")
+def test_fit_svensson_daily_lambda_bounds():
+    """λ1 and λ2 must stay within the optimizer bounds [0.1, 10]."""
+    result = fit_svensson_daily("2023-01-02", "2023-01-31")
+    assert (result["lambda1"] >= 0.1).all() and (result["lambda1"] <= 10.0).all()
+    assert (result["lambda2"] >= 0.1).all() and (result["lambda2"] <= 10.0).all()
+
+
+@pytest.mark.skipif(not _PARQUET.exists(), reason="treasury_bonds.parquet not on disk")
+def test_fit_svensson_daily_saves_parquet(tmp_path, monkeypatch):
+    """Running the loop must create svensson_params.parquet on disk."""
+    out = Path("data/processed/svensson_params.parquet")
+    result = fit_svensson_daily("2024-01-02", "2024-01-05")
+    assert out.exists()
+    on_disk = pd.read_parquet(out)
+    assert len(on_disk) >= 1
