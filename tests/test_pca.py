@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 
 from src.termstructure.pca.panel import DEFAULT_MATURITIES, _col, build_zero_panel
-from src.termstructure.pca.decomposition import fit_pca, compute_factor_scores
+from src.termstructure.pca.decomposition import fit_pca, compute_factor_scores, save_pca_outputs
 
 
 # ---------------------------------------------------------------------------
@@ -244,3 +244,49 @@ def test_compute_factor_scores_proxy_regression():
         assert r ** 2 >= thresholds[name], (
             f"{name} daily proxy R²={r**2:.3f} < {thresholds[name]}"
         )
+
+
+# ---------------------------------------------------------------------------
+# save_pca_outputs
+# ---------------------------------------------------------------------------
+
+_LOADINGS = Path("data/processed/pca_loadings.parquet")
+_SCORES   = Path("data/processed/factor_scores.parquet")
+_SAVE_OK  = _MODEL.exists() and _PANEL.exists()
+
+
+@pytest.mark.skipif(not _SAVE_OK, reason="pca_model.joblib or zero_panel.parquet not on disk")
+def test_save_pca_outputs_creates_files():
+    """Both parquets must exist after calling save_pca_outputs."""
+    save_pca_outputs()
+    assert _LOADINGS.exists(), "pca_loadings.parquet not created"
+    assert _SCORES.exists(),   "factor_scores.parquet not created"
+
+
+@pytest.mark.skipif(not _SAVE_OK, reason="pca_model.joblib or zero_panel.parquet not on disk")
+def test_pca_loadings_schema():
+    """Loadings parquet must have pc, var_ratio, and one y_ column per maturity."""
+    save_pca_outputs()
+    df = pd.read_parquet(_LOADINGS)
+    assert "pc" in df.columns
+    assert "var_ratio" in df.columns
+    for m in DEFAULT_MATURITIES:
+        assert f"y_{_col(float(m))}" in df.columns, f"missing y_{_col(float(m))}"
+
+
+@pytest.mark.skipif(not _SAVE_OK, reason="pca_model.joblib or zero_panel.parquet not on disk")
+def test_pca_loadings_var_ratio_sums_to_one():
+    """Saved variance ratios must sum to 1 (full-rank model)."""
+    save_pca_outputs()
+    df = pd.read_parquet(_LOADINGS)
+    assert abs(df["var_ratio"].sum() - 1.0) < 1e-6
+
+
+@pytest.mark.skipif(not _SAVE_OK, reason="pca_model.joblib or zero_panel.parquet not on disk")
+def test_factor_scores_parquet_matches_compute():
+    """Saved factor_scores.parquet must match compute_factor_scores() output."""
+    save_pca_outputs()
+    on_disk = pd.read_parquet(_SCORES)
+    live    = compute_factor_scores()
+    assert list(on_disk.columns) == list(live.columns)
+    assert len(on_disk) == len(live)
