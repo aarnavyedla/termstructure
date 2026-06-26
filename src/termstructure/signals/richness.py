@@ -108,3 +108,69 @@ def compute_residuals(
     result.to_parquet(out_path, index=False)
     print(f"Saved {len(result):,} rows -> {out_path}")
     return result
+
+
+def compute_zscore_signal(
+    window: int = 60,
+    min_periods: int = 30,
+) -> pd.DataFrame:
+    """
+    Compute rolling z-score richness/cheapness signal from demeaned residuals.
+
+    z_t = (residual_t - rolling_mean) / rolling_std
+
+    where rolling_mean and rolling_std are computed over the trailing `window`
+    trading days. Requires at least `min_periods` observations before emitting
+    a score (earlier rows are NaN).
+
+    Signal interpretation:
+        z > +2.0  →  cheap  (buy)
+        z < -2.0  →  rich   (sell)
+        |z| < 2.0 →  no signal
+        z → 0     →  exit
+
+    Reads:  data/processed/bond_residuals.parquet  (already demeaned, outliers dropped)
+    Writes: data/processed/richness_signal.parquet
+
+    Returns:
+        Long-format DataFrame with columns:
+            date, maturity, residual_bps, rolling_mean, rolling_std, z_score
+    """
+    residuals = pd.read_parquet(_ROOT / "data/processed/bond_residuals.parquet")
+    residuals["date"] = pd.to_datetime(residuals["date"])
+
+    pivot = (
+        residuals
+        .pivot(index="date", columns="maturity", values="residual_bps")
+        .sort_index()
+    )
+
+    roll_mean = pivot.rolling(window, min_periods=min_periods).mean()
+    roll_std  = pivot.rolling(window, min_periods=min_periods).std()
+    z         = (pivot - roll_mean) / roll_std
+
+    records: list[pd.DataFrame] = []
+    for mat in pivot.columns:
+        df = pd.DataFrame({
+            "date":         pivot.index,
+            "maturity":     mat,
+            "residual_bps": pivot[mat].values,
+            "rolling_mean": roll_mean[mat].values,
+            "rolling_std":  roll_std[mat].values,
+            "z_score":      z[mat].values,
+        })
+        records.append(df)
+
+    result = pd.concat(records, ignore_index=True)
+    result = result.dropna(subset=["z_score"])
+    result = result.sort_values(["date", "maturity"]).reset_index(drop=True)
+
+    out_path = _ROOT / "data/processed/richness_signal.parquet"
+    result.to_parquet(out_path, index=False)
+
+    n_long  = (result["z_score"] >  2.0).sum()
+    n_short = (result["z_score"] < -2.0).sum()
+    pct_signal = (n_long + n_short) / len(result)
+    print(f"Saved {len(result):,} rows -> {out_path}")
+    print(f"Signal at |z| > 2:  {n_long:,} long  {n_short:,} short  ({pct_signal:.1%} of all obs)")
+    return result
