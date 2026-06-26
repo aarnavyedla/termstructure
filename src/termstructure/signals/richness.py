@@ -174,3 +174,47 @@ def compute_zscore_signal(
     print(f"Saved {len(result):,} rows -> {out_path}")
     print(f"Signal at |z| > 2:  {n_long:,} long  {n_short:,} short  ({pct_signal:.1%} of all obs)")
     return result
+
+
+def build_signal_panel(entry_z: float = 2.0) -> pd.DataFrame:
+    """
+    Build the final backtest-ready signal panel from the z-score signal.
+
+    Adds a `direction` column encoding the trade direction at the given entry
+    threshold, then saves the full panel (all dates, all maturities, including
+    direction=0 rows) so Week 6 can query any date without re-implementing
+    threshold logic.
+
+    direction encoding:
+        +1  z >  +entry_z   cheap → buy
+        -1  z <  -entry_z   rich  → sell
+         0  |z| <= entry_z  no signal
+
+    Reads:  data/processed/richness_signal.parquet
+    Writes: data/processed/signal_panel.parquet
+
+    Returns:
+        Long-format DataFrame with columns:
+            date, maturity, residual_bps, rolling_mean, rolling_std,
+            z_score, direction
+    """
+    sig = pd.read_parquet(_ROOT / "data/processed/richness_signal.parquet")
+    sig["date"] = pd.to_datetime(sig["date"])
+
+    sig["direction"] = 0
+    sig.loc[sig["z_score"] >  entry_z, "direction"] = 1
+    sig.loc[sig["z_score"] < -entry_z, "direction"] = -1
+
+    sig = sig.sort_values(["date", "maturity"]).reset_index(drop=True)
+
+    out_path = _ROOT / "data/processed/signal_panel.parquet"
+    sig.to_parquet(out_path, index=False)
+
+    n_long  = (sig["direction"] ==  1).sum()
+    n_short = (sig["direction"] == -1).sum()
+    n_dates = sig["date"].nunique()
+    print(f"Saved {len(sig):,} rows across {n_dates:,} dates -> {out_path}")
+    print(f"Entry threshold : |z| > {entry_z}")
+    print(f"Long signals    : {n_long:,}  ({n_long/len(sig):.1%})")
+    print(f"Short signals   : {n_short:,}  ({n_short/len(sig):.1%})")
+    return sig
