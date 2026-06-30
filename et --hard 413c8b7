@@ -1,0 +1,29 @@
+[33ma1b3407[m[33m ([m[1;36mHEAD[m[33m)[m finished week 6 day 2, portfolio construction with factor-neutral hedges
+[33m4b4735c[m finished week 6 day 1, computed factor neutral hedge math, restricuted universe to 2Y-10Y
+[33m413c8b7[m finished week 5 day 5, saved signals to parquet
+[33m70cbd9e[m finished week 5 day 4, validated signal predictive power and confirmed mean reversion properties
+[33m1f1a578[m finished week 5, day 3. computed z-scores for signal
+[33m94d0fd9[m finished week 5 day 2, explored residuals, confirmed mean-reversion properties
+[33m3397c47[m finished week 5 day 1, computed and demean per-bond resiudals
+[33m3d46c52[m finished week 4 day 5, save PCA model components and factor scores to parquet
+[33m3cb1df6[m finished week 4 day 4, computed PCA factor scores
+[33me2f1591[m finished week 4 day 3, confirming factor shapes
+[33m0e4c708[m finished week 4 day 2, ran PCA on yield changes
+[33m9a8ac9b[m finished week 4 day 1, built a zero-rate panel from svensson fits
+[33m17fbaf1[m finished week 3 day 5, validated Svensson fits against historical data
+[33mdd9c077[m added week 3 day 4, ran Svensson loop over historical data
+[33meaf28d9[m finished week 3 day 3, created filter_bonds_for_fitting to exclude wrong bond types
+[33mb10784f[m finished week 3 day 2, added fit_svensson
+[33m89afab6[m finished week 3 day 1, created svennson_zero_rate
+[33mfd95151[m finished week 2 day 5, wrote tests testing all pricing functions
+[33mcdd8635[m finished week 2 day 4, converted par rates to discount rates to zero coupon yield
+[33m2b81622[m Finished Week 2 Day 3, added key_rate_durations to pricing
+[33mc4d6f8a[m Finished week 2 day 2, added modified_duration and dv01 functions in pricing
+[33me881cb1[m Finished Week 2 Day 1, added price_from_ytm and ytm_from_price
+[33m22ec0f2[m finished query layer, ready to move onto week 2
+[33m21a5066[m Week 1 Day 3-4: load_fed_curves and GSW dataset parsing
+[33m1470fa1[m Week 1 Day 1-2: fetch_fred_yields and CMT yield exploration
+[33m219b8b2[m explored fred data
+[33me76981f[m updated gitignore
+[33mcf259af[m add environment sanity check notebook
+[33mea4e8b5[m initial project skeleton and dependencies
