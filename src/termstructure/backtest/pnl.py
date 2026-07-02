@@ -153,12 +153,24 @@ def compute_transaction_costs(
         positions = pd.read_parquet(_DATA / "portfolio_positions.parquet")
         positions["date"] = pd.to_datetime(positions["date"])
 
+    # Only charge costs on dates where zero_panel yield data exists.
+    # The 1970s have positions but no yield changes (zero_panel drops those dates),
+    # so gross P&L is zero there — charging costs would create spurious net-negative days.
+    zp_dates = pd.read_parquet(_DATA / "zero_panel.parquet", columns=["date"])["date"]
+    zp_dates = set(pd.to_datetime(zp_dates))
+
     streaks = _detect_streaks(positions)
 
     # Build a set of (date, signal_maturity) → number of events (entry + exit)
     # Same date can be both entry and exit (single-day streak) → 2 events
-    entry_key = set(zip(streaks["entry_date"], streaks["signal_maturity"]))
-    exit_key  = set(zip(streaks["exit_date"],  streaks["signal_maturity"]))
+    entry_key = set(
+        (d, m) for d, m in zip(streaks["entry_date"], streaks["signal_maturity"])
+        if d in zp_dates
+    )
+    exit_key = set(
+        (d, m) for d, m in zip(streaks["exit_date"], streaks["signal_maturity"])
+        if d in zp_dates
+    )
 
     key = list(zip(positions["date"], positions["signal_maturity"]))
     n_events = np.array([
