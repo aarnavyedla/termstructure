@@ -39,15 +39,15 @@ def compute_stats(
         dict with keys: label, total_pnl, ann_pnl, sharpe, max_dd, calmar,
                         hit_rate, n_active, n_zero
     """
-    active = pnl[pnl != 0]
+    active = pnl[pnl != 0]   # used only for hit_rate; not for Sharpe
     n_active = len(active)
 
-    if n_active < 2:
+    if len(pnl) < 2:
         return {"label": label, "total_pnl": pnl.sum(), "ann_pnl": 0,
                 "sharpe": np.nan, "max_dd": 0, "calmar": np.nan,
                 "hit_rate": np.nan, "n_active": n_active, "n_zero": len(pnl) - n_active}
 
-    sharpe = active.mean() / active.std() * np.sqrt(252)
+    sharpe = pnl.mean() / pnl.std() * np.sqrt(252) if pnl.std() > 0 else np.nan
     cum = pnl.cumsum()
     max_dd = (cum - cum.cummax()).min()
 
@@ -71,6 +71,24 @@ def compute_stats(
         "n_active":  n_active,
         "n_zero":    len(pnl) - n_active,
     }
+
+
+def _expand_to_full_calendar(merged: pd.DataFrame) -> pd.DataFrame:
+    """Reindex a daily P&L DataFrame to every trading day in the backtest period.
+
+    Trading days are sourced from zero_panel.parquet (the Svensson-curve calendar,
+    starting Nov 1985). Days with no open position fill to 0. This is required so
+    Sharpe is not inflated by excluding the ~86% of trading days when the strategy
+    holds no position.
+    """
+    zp = pd.read_parquet(_DATA / "zero_panel.parquet", columns=["date"])
+    all_dates = pd.to_datetime(zp["date"]).drop_duplicates().sort_values()
+    all_dates = all_dates[all_dates <= merged["date"].max()]
+    return (
+        merged.set_index("date")
+        .reindex(all_dates, fill_value=0.0)
+        .reset_index()
+    )
 
 
 def print_stats_table(
@@ -99,6 +117,10 @@ def print_stats_table(
     n_years = (daily["date"].max() - daily["date"].min()).days / 365.25
     rts_per_yr = len(streaks) / n_years
 
+    # Expand to full trading calendar before computing stats so that flat/no-position
+    # days (zero P&L) are included in the Sharpe denominator.
+    merged = _expand_to_full_calendar(merged)
+
     s_gross  = compute_stats(merged.set_index("date")["total_pnl"],    "Gross",  n_years)
     s_scaled = compute_stats(merged.set_index("date")["scaled_pnl"], f"Scaled (×{position_scale})", n_years)
     s_net    = compute_stats(merged.set_index("date")["net_pnl"],      f"Net ({cost_bps}bp/leg/event)", n_years)
@@ -120,7 +142,7 @@ def print_stats_table(
 
     row("Total P&L ($)",        "total_pnl", "${:>,.0f}")
     row("Ann. avg P&L ($)",     "ann_pnl",   "${:>,.0f}")
-    row("Sharpe (active days)", "sharpe",    "{:>.2f}")
+    row("Sharpe",               "sharpe",    "{:>.2f}")
     row("Max drawdown ($)",     "max_dd",    "${:>,.0f}")
     row("Calmar ratio",         "calmar",    "{:>.2f}")
     row("Hit rate",             "hit_rate",  "{:>.1%}")
@@ -161,7 +183,7 @@ def plot_tearsheet(
       1. Equity curve: gross vs net cumulative P&L
       2. Monthly P&L heatmap (gross)
       3. Daily P&L distribution (net)
-      4. Rolling 12-month Sharpe (net, active days)
+      4. Rolling 12-month Sharpe (net, all trading days)
       5. Attribution: cumulative P&L by maturity bucket (signal legs, gross)
       6. Attribution: cumulative P&L by direction (signal legs, gross)
 
@@ -179,6 +201,8 @@ def plot_tearsheet(
     ).fillna(0).sort_values("date").reset_index(drop=True)
     merged["scaled_pnl"] = merged["total_pnl"] * position_scale
     merged["net_pnl"]    = merged["scaled_pnl"] - merged["_tc"]
+    # Expand to full trading calendar so Sharpe and rolling Sharpe include flat days.
+    merged = _expand_to_full_calendar(merged)
     merged["cum_gross"]  = merged["scaled_pnl"].cumsum()
     merged["cum_net"]    = merged["net_pnl"].cumsum()
 
@@ -242,15 +266,13 @@ def plot_tearsheet(
     # ── Panel 4: rolling 12-month Sharpe ─────────────────────────────────────
     ax = ax_roll
     net_s = merged.set_index("date")["net_pnl"]
-    # Use 252-day window on active-day series
-    active_net = net_s[net_s != 0]
-    roll_sh = active_net.rolling(252, min_periods=126).apply(
+    roll_sh = net_s.rolling(252, min_periods=126).apply(
         lambda x: x.mean() / x.std() * np.sqrt(252) if x.std() > 0 else np.nan
     )
     ax.plot(roll_sh.index, roll_sh.values, color="steelblue", linewidth=1)
     ax.axhline(0, color="black", linewidth=0.5)
     ax.axhline(1, color="grey", linewidth=0.7, linestyle="--", label="Sharpe = 1")
-    ax.set_ylabel("Rolling Sharpe (252 active days)")
+    ax.set_ylabel("Rolling Sharpe (252 trading days)")
     ax.set_title("Rolling 12-month Sharpe (net)", fontsize=10)
     ax.legend(fontsize=8)
 
