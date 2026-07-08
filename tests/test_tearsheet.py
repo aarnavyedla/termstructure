@@ -112,6 +112,52 @@ def test_compute_stats_n_active_counts_nonzero():
     assert s["n_zero"] == 2
 
 
+# ─── Regression: flat-day Sharpe inflation (Week 7 Day 1 bug) ────────────────
+
+def test_sharpe_includes_flat_days() -> None:
+    """Sharpe denominator includes all calendar days, not just active (non-zero) days.
+
+    Pre-fix code: sharpe = active.mean() / active.std() * sqrt(252)
+                  where active = pnl[pnl != 0]      ← inflated
+
+    Fixed code:   sharpe = pnl.mean() / pnl.std() * sqrt(252)   ← correct
+
+    For a strategy trading ~14% of days the inflation factor is
+    sqrt(1 / 0.14) ≈ 2.7×.  This test catches any regression that
+    reintroduces active-only filtering in compute_stats.
+    """
+    rng = np.random.default_rng(0)
+    n_total = 252 * 5        # 5-year backtest
+    n_active = int(n_total * 0.14)  # 14% of days active, matching real strategy
+
+    active_pnl = rng.normal(100, 400, n_active)
+
+    idx = pd.date_range("2018-01-02", periods=n_total, freq="B")
+    full = pd.Series(np.zeros(n_total), index=idx)
+    full.iloc[:n_active] = active_pnl          # first 14% of days are active
+
+    active_only = pd.Series(active_pnl, index=idx[:n_active])
+
+    s = compute_stats(full)
+
+    # Buggy computation that the old code produced
+    buggy_sharpe = float(active_only.mean() / active_only.std() * np.sqrt(252))
+    # Correct computation: pnl.mean() / pnl.std() * sqrt(252) over all days
+    correct_sharpe = float(full.mean() / full.std() * np.sqrt(252))
+
+    # 1. compute_stats returns the correct (all-days) Sharpe
+    assert s["sharpe"] == pytest.approx(correct_sharpe, rel=1e-6)
+
+    # 2. The correct Sharpe is substantially lower than the buggy active-only Sharpe
+    assert s["sharpe"] < buggy_sharpe
+
+    # 3. The ratio should match sqrt(n_active / n_total) within 5pp —
+    #    this is the exact inflation formula for the flat-day distortion.
+    expected_ratio = np.sqrt(n_active / n_total)
+    actual_ratio = s["sharpe"] / buggy_sharpe
+    assert actual_ratio == pytest.approx(expected_ratio, abs=0.05)
+
+
 # ─── print_stats_table integration test ───────────────────────────────────────
 
 @_requires_data

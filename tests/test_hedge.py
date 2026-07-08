@@ -1,6 +1,9 @@
 """Unit tests for factor-neutral hedge math."""
 
+from pathlib import Path
+
 import numpy as np
+import pandas as pd
 import pytest
 
 from termstructure.risk.hedge import (
@@ -130,3 +133,60 @@ def test_build_hedge_neutralizes_exposures():
     )
     residual = result["target_exposures"] + result["hedge_exposures"] @ result["hedge_weights"]
     np.testing.assert_allclose(residual, 0.0, atol=1e-8)
+
+
+# ─── Regression: stale PCA loadings in hedge construction (Week 7 Day 3 bug) ──
+
+_PCA_LOADINGS = Path("data/processed/pca_loadings.parquet")
+
+@pytest.mark.skipif(not _PCA_LOADINGS.exists(), reason="pca_loadings.parquet not on disk")
+def test_hedge_weights_match_current_loadings() -> None:
+    """_load_pca_loadings() reads live from pca_loadings.parquet with correct shapes.
+
+    Week 7 Day 3 bug: portfolio_positions.parquet was built with stale PCA loadings
+    that embedded an unintended 2Y/3Y slope bet instead of true factor neutrality.
+    The fix was to rebuild portfolio_positions.parquet using the current loadings.
+
+    This regression guards against:
+    (a) hardcoded loadings in _load_pca_loadings()
+    (b) loadings with wrong sign or shape that would re-introduce factor exposure
+    """
+    from termstructure.backtest.portfolio import _load_pca_loadings
+
+    loadings = _load_pca_loadings()
+
+    # (a) Must match pca_loadings.parquet exactly — no hardcoding, no caching
+    pca_df = pd.read_parquet(_PCA_LOADINGS)
+    expected = pca_df.iloc[:3, 2:].to_numpy()
+    np.testing.assert_array_equal(
+        loadings, expected,
+        err_msg="_load_pca_loadings() does not match pca_loadings.parquet; "
+                "portfolio was built with stale loadings",
+    )
+
+    # (b) PC1 (level): Litterman-Scheinkman predicts a near-flat, single-signed vector.
+    #     If loadings were stale/wrong, PC1 might slope or change sign across maturities.
+    pc1 = loadings[0]
+    assert np.all(pc1 > 0) or np.all(pc1 < 0), (
+        f"PC1 (level) must be single-signed (all > 0 or all < 0); "
+        f"got signs {np.sign(pc1).astype(int).tolist()} — indicates wrong eigenvector"
+    )
+
+    # (c) PC2 (slope): should be monotonically increasing or decreasing.
+    #     A slope factor with a local 2Y/3Y reversal would indicate stale data.
+    pc2 = loadings[1]
+    diffs = np.diff(pc2)
+    frac_same_sign = max((diffs > 0).mean(), (diffs < 0).mean())
+    assert frac_same_sign >= 0.80, (
+        f"PC2 (slope) should be ≥80% monotonic; got {frac_same_sign:.0%} — "
+        f"a local 2Y/3Y reversal indicates the stale-loadings bug is back"
+    )
+
+    # (d) PC3 (curvature): midpoint and endpoints should have opposite signs.
+    pc3 = loadings[2]
+    n = len(pc3)
+    endpoint_sign = np.sign((pc3[0] + pc3[-1]) / 2)
+    midpoint_sign = np.sign(pc3[n // 2])
+    assert endpoint_sign != midpoint_sign, (
+        "PC3 (curvature) endpoints and midpoint must have opposite signs"
+    )
