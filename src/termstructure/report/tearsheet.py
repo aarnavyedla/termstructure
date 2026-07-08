@@ -57,7 +57,7 @@ def compute_stats(
     if n_years is None and hasattr(pnl.index, "min"):
         try:
             n_years = (pnl.index.max() - pnl.index.min()).days / 365.25
-        except TypeError:
+        except (TypeError, AttributeError):
             n_years = n_active / 252
 
     ann_pnl = pnl.sum() / n_years if (n_years and n_years > 0) else active.mean() * 252
