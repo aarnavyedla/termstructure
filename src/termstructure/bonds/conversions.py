@@ -9,19 +9,19 @@ def zero_to_discount(rate: float, maturity: float, freq: int = 2) -> float:
     maturity: time in years
     freq:     compounding frequency per year (2 = semi-annual)
     """
-    return (1 + rate / freq) ** (-maturity * freq)
+    return float((1 + rate / freq) ** (-maturity * freq))
 
 
 def discount_to_zero(df: float, maturity: float, freq: int = 2) -> float:
     """Convert a discount factor to an annual zero rate."""
-    return freq * (df ** (-1.0 / (maturity * freq)) - 1)
+    return float(freq * (df ** (-1.0 / (maturity * freq)) - 1))
 
 
 def zeros_to_par(
-    maturities: NDArray,
-    zero_rates: NDArray,
+    maturities: NDArray[np.float64],
+    zero_rates: NDArray[np.float64],
     freq: int = 2,
-) -> NDArray:
+) -> NDArray[np.float64]:
     """Compute par yields from a zero curve sampled at coupon-period maturities.
 
     maturities: 1-D array of times in years at each coupon date, e.g.
@@ -35,7 +35,7 @@ def zeros_to_par(
     zero_rates = np.asarray(zero_rates, dtype=float)
     n = len(maturities)
 
-    dfs = zero_to_discount(zero_rates, maturities, freq)
+    dfs: NDArray[np.float64] = np.asarray((1 + zero_rates / freq) ** (-maturities * freq))
     par_yields = np.empty(n)
 
     for i in range(n):
@@ -46,10 +46,10 @@ def zeros_to_par(
 
 
 def par_to_zeros(
-    maturities: NDArray,
-    par_yields: NDArray,
+    maturities: NDArray[np.float64],
+    par_yields: NDArray[np.float64],
     freq: int = 2,
-) -> NDArray:
+) -> NDArray[np.float64]:
     """Bootstrap zero rates from par yields (inverse of zeros_to_par).
 
     maturities: 1-D array of times in years at each coupon date

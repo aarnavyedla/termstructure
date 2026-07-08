@@ -1,7 +1,8 @@
 """Query layer for processed Treasury data."""
 
-import pandas as pd
 from pathlib import Path
+
+import pandas as pd
 
 _PROCESSED = Path(__file__).resolve().parents[2] / "data/processed"
 _BONDS_PATH = _PROCESSED / "treasury_bonds.parquet"

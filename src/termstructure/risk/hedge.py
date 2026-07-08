@@ -1,3 +1,5 @@
+from typing import Any
+
 import numpy as np
 
 from termstructure.bonds.pricing import key_rate_durations
@@ -35,7 +37,7 @@ def bond_factor_exposures(
         bucket_points=krd_buckets,
     )
     krd_vec = np.array([krd_dict[b] for b in krd_buckets])
-    return loadings @ krd_vec
+    return np.asarray(loadings @ krd_vec)
 
 
 def compute_hedge_weights(
@@ -75,7 +77,7 @@ def build_hedge(
     curve_rates: np.ndarray,
     loadings: np.ndarray,
     krd_buckets: list[float] = KRD_BUCKETS,
-) -> dict:
+) -> dict[str, Any]:
     """Compute a 3-factor hedge for one target bond.
 
     Args:

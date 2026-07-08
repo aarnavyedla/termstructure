@@ -1,9 +1,10 @@
 """Parse the Federal Reserve GSW (2006) Svensson curve dataset."""
 
 import io
-import requests
-import pandas as pd
 from pathlib import Path
+
+import pandas as pd
+import requests
 
 URL = "https://www.federalreserve.gov/data/yield-curve-tables/feds200628.csv"
 

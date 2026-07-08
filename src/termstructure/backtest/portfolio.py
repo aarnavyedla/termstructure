@@ -1,6 +1,8 @@
+from pathlib import Path
+from typing import Any
+
 import numpy as np
 import pandas as pd
-from pathlib import Path
 
 from termstructure.bonds.pricing import dv01 as _dv01
 from termstructure.curves.svensson import svensson_zero_rate
@@ -16,7 +18,7 @@ _FINE_GRID = np.array([0.5, 1, 2, 3, 5, 7, 10, 15, 20, 25, 30], dtype=float)
 
 def _load_pca_loadings() -> np.ndarray:
     df = pd.read_parquet(_DATA / "pca_loadings.parquet")
-    return df.iloc[:3, 2:].to_numpy()
+    return np.asarray(df.iloc[:3, 2:].to_numpy())
 
 
 def _sv_curve(sv: np.ndarray) -> np.ndarray:
@@ -30,14 +32,14 @@ def _position_legs(
     sv: np.ndarray,
     loadings: np.ndarray,
     target_dv01: float,
-    date,
-) -> list[dict]:
-    ytm = svensson_zero_rate(float(signal_mat), *sv)
+    date: pd.Timestamp,
+) -> list[dict[str, Any]]:
+    ytm: float = float(svensson_zero_rate(float(signal_mat), *sv))
     dv01_per_dollar = _dv01(ytm, float(signal_mat), ytm, face=1.0)
     signal_face = target_dv01 / dv01_per_dollar
 
     curve_rates = _sv_curve(sv)
-    hedge_coupons = [svensson_zero_rate(m, *sv) for m in HEDGE_MATURITIES]
+    hedge_coupons: list[float] = [float(svensson_zero_rate(m, *sv)) for m in HEDGE_MATURITIES]
 
     result = build_hedge(
         ytm, float(signal_mat),
@@ -59,7 +61,7 @@ def _position_legs(
     }]
 
     for h_mat, w in zip(HEDGE_MATURITIES, weights):
-        h_ytm = svensson_zero_rate(h_mat, *sv)
+        h_ytm: float = float(svensson_zero_rate(h_mat, *sv))
         h_notional = direction * w * signal_face
         h_dv01_per_dollar = _dv01(h_ytm, h_mat, h_ytm, face=1.0)
         legs.append({
@@ -77,7 +79,7 @@ def _position_legs(
 
 
 def construct_portfolio(
-    date,
+    date: pd.Timestamp,
     sv: np.ndarray,
     today_signals: pd.DataFrame,
     loadings: np.ndarray | None = None,
@@ -89,11 +91,15 @@ def construct_portfolio(
 
     today = today_signals[today_signals["maturity"].isin(SIGNAL_MATURITIES)]
     active = today[today["direction"] != 0]
-    longs  = active[active["direction"] ==  1].sort_values("z_score", ascending=False).head(n_per_side)
-    shorts = active[active["direction"] == -1].sort_values("z_score", ascending=True).head(n_per_side)
+    longs  = active[active["direction"] ==  1].sort_values("z_score", ascending=False).head(
+        n_per_side
+    )
+    shorts = active[active["direction"] == -1].sort_values("z_score", ascending=True).head(
+        n_per_side
+    )
     selected = pd.concat([longs, shorts])
 
-    all_legs: list[dict] = []
+    all_legs: list[dict[str, Any]] = []
     for _, row in selected.iterrows():
         all_legs.extend(_position_legs(
             int(row["maturity"]),
@@ -125,7 +131,9 @@ def build_portfolio_history(target_dv01: float = 10_000, n_per_side: int = 5) ->
 
     for date in common_dates:
         try:
-            sv = params.loc[date, ["beta0", "beta1", "beta2", "beta3", "lambda1", "lambda2"]].to_numpy(float)
+            sv = params.loc[
+                date, ["beta0", "beta1", "beta2", "beta3", "lambda1", "lambda2"]
+            ].to_numpy(float)
         except KeyError:
             continue
         if np.any(np.isnan(sv)):

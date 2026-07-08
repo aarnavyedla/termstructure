@@ -1,16 +1,19 @@
 """Tearsheet generator for the factor-neutral RV strategy backtest."""
 
+from pathlib import Path
+from typing import Any
+
+import matplotlib.gridspec as gridspec
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-import matplotlib.gridspec as gridspec
-from pathlib import Path
+from matplotlib.figure import Figure
 
 from termstructure.backtest.pnl import (
+    _detect_streaks,
     compute_leg_pnl,
     compute_portfolio_pnl,
     compute_transaction_costs,
-    _detect_streaks,
 )
 
 _DATA = Path(__file__).resolve().parents[3] / "data" / "processed"
@@ -27,7 +30,7 @@ def compute_stats(
     pnl: pd.Series,
     label: str = "",
     n_years: float | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Compute standard performance metrics for a daily P&L series.
 
     Args:
@@ -122,20 +125,26 @@ def print_stats_table(
     merged = _expand_to_full_calendar(merged)
 
     s_gross  = compute_stats(merged.set_index("date")["total_pnl"],    "Gross",  n_years)
-    s_scaled = compute_stats(merged.set_index("date")["scaled_pnl"], f"Scaled (×{position_scale})", n_years)
-    s_net    = compute_stats(merged.set_index("date")["net_pnl"],      f"Net ({cost_bps}bp/leg/event)", n_years)
+    s_scaled = compute_stats(
+        merged.set_index("date")["scaled_pnl"], f"Scaled (×{position_scale})", n_years
+    )
+    s_net    = compute_stats(
+        merged.set_index("date")["net_pnl"], f"Net ({cost_bps}bp/leg/event)", n_years
+    )
 
     w = 22
     hdr = f"{'Metric':<30} {'Gross':>{w}} {'Scaled':>{w}} {'Net':>{w}}"
     sep = "-" * len(hdr)
     print()
-    print(f"  Factor-neutral RV strategy -- backtest tearsheet")
-    print(f"  Cost assumption: {cost_bps}bp per leg per event  |  Position scale: {position_scale}x")
+    print("  Factor-neutral RV strategy -- backtest tearsheet")
+    print(
+        f"  Cost assumption: {cost_bps}bp per leg per event  |  Position scale: {position_scale}x"
+    )
     print(sep)
     print(hdr)
     print(sep)
 
-    def row(name, key, fmt):
+    def row(name: str, key: str, fmt: str) -> None:
         vals = [s_gross[key], s_scaled[key], s_net[key]]
         cells = [fmt.format(v) for v in vals]
         print(f"  {name:<28} {cells[0]:>{w}} {cells[1]:>{w}} {cells[2]:>{w}}")
@@ -168,15 +177,17 @@ def _monthly_returns(pnl: pd.Series, dates: pd.Series) -> pd.DataFrame:
     df["year"]  = df["date"].dt.year
     df["month"] = df["date"].dt.month
     pivot = df.groupby(["year", "month"])["pnl"].sum().unstack(fill_value=0)
-    pivot.columns = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][:len(pivot.columns)]
+    months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+               "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    pivot.columns = months[:len(pivot.columns)]
     return pivot
 
 
 def plot_tearsheet(
     cost_bps: float = DEFAULT_COST_BPS,
     position_scale: float = DEFAULT_POS_SCALE,
-    figsize: tuple = (15, 20),
-) -> plt.Figure:
+    figsize: tuple[int, int] = (15, 20),
+) -> Figure:
     """Generate a 6-panel tearsheet figure.
 
     Panels:
@@ -235,7 +246,10 @@ def plot_tearsheet(
     # ── Panel 2: monthly heatmap ─────────────────────────────────────────────
     monthly = _monthly_returns(merged["scaled_pnl"], merged["date"]) / 1e3
     ax = ax_heat
-    vmax = np.percentile(np.abs(monthly.values[monthly.values != 0]), 95) if monthly.values.any() else 1
+    vmax = (
+        np.percentile(np.abs(monthly.values[monthly.values != 0]), 95)
+        if monthly.values.any() else 1
+    )
     im = ax.imshow(monthly.values, aspect="auto", cmap="RdYlGn",
                    vmin=-vmax, vmax=vmax)
     ax.set_xticks(range(len(monthly.columns)))

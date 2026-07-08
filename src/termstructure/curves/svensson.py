@@ -1,3 +1,5 @@
+from typing import Any
+
 import numpy as np
 import pandas as pd
 from scipy.optimize import least_squares
@@ -27,9 +29,9 @@ def svensson_zero_rate(
 
     # Loading factors — (1 - exp(-t/λ)) / (t/λ)
     # At tau=0 the limit is 1.0; use np.where to avoid division by zero.
-    def loading(t, lam):
+    def loading(t: np.ndarray, lam: float) -> np.ndarray:
         x = t / lam
-        return np.where(x == 0.0, 1.0, (1.0 - np.exp(-x)) / x)
+        return np.asarray(np.where(x == 0.0, 1.0, (1.0 - np.exp(-x)) / x))
 
     L1 = loading(tau, lambda1)
     L2 = loading(tau, lambda2)
@@ -66,18 +68,20 @@ def fit_svensson(
     yields = np.asarray(yields, dtype=float)
     weights = 1.0 / maturities  # inverse-duration proxy; down-weights noisy long end
 
-    def residuals(p):
-        return weights * (svensson_zero_rate(maturities, *p) - yields)
+    def residuals(p: np.ndarray) -> np.ndarray:
+        return np.asarray(weights * (svensson_zero_rate(maturities, *p) - yields))
 
-    if x0 is None:
-        x0 = [yields[-1], yields[0] - yields[-1], 0.0, 0.0, 2.0, 5.0]
+    x0_arr: np.ndarray = (
+        np.array([yields[-1], yields[0] - yields[-1], 0.0, 0.0, 2.0, 5.0])
+        if x0 is None else np.asarray(x0)
+    )
     bounds = (
         [0.00, -0.15, -0.15, -0.15, 0.1, 0.1],
         [0.20,  0.15,  0.15,  0.15, 10., 10.],
     )
 
-    result = least_squares(residuals, x0, method='trf', bounds=bounds)
-    return result.x
+    result = least_squares(residuals, x0_arr, method='trf', bounds=bounds)
+    return np.asarray(result.x)
 
 
 def filter_bonds_for_fitting(bonds_df: pd.DataFrame) -> pd.DataFrame:
@@ -144,12 +148,12 @@ def fit_svensson_daily(
     df = pd.read_parquet(parquet_in)
     df["date"] = pd.to_datetime(df["date"])
     df = df.set_index("date").sort_index()
-    df = df.loc[start:end]
+    df = df.loc[start:end]  # type: ignore[misc]
 
     zero_cols    = [f"sveny{i:02d}" for i in range(1, 31)]
     all_mats     = np.arange(1, 31, dtype=float)
 
-    records: list[dict] = []
+    records: list[dict[str, Any]] = []
     prev_params: np.ndarray | None = None
     n = len(df)
 
@@ -161,7 +165,10 @@ def fit_svensson_daily(
             elapsed = _time.perf_counter() - t0
             if i > 0:
                 eta_min = elapsed / i * (n - i) / 60
-                print(f"  {i:>5}/{n} ({i/n*100:.0f}%)  {date.date()}  ETA {eta_min:.1f} min", flush=True)
+                print(
+                    f"  {i:>5}/{n} ({i/n*100:.0f}%)  {date.date()}  ETA {eta_min:.1f} min",
+                    flush=True,
+                )
             else:
                 print(f"  {i:>5}/{n} ( 0%)  {date.date()}", flush=True)
 
@@ -199,7 +206,7 @@ def fit_svensson_daily(
     result = pd.DataFrame(records)
     parquet_out.parent.mkdir(parents=True, exist_ok=True)
     result.to_parquet(parquet_out, index=False)
-    print(f"Done. Saved {len(result):,} rows → {parquet_out}")
+    print(f"Done. Saved {len(result):,} rows -> {parquet_out}")
     return result
 
 
@@ -243,7 +250,7 @@ def validate_svensson_daily(
     common = our.index.intersection(fed.index)
     param_cols = ["beta0", "beta1", "beta2", "beta3", "lambda1", "lambda2"]
 
-    records: list[dict] = []
+    records: list[dict[str, Any]] = []
     for mat in maturities:
         col = f"sveny{mat:02d}"
         valid = ~fed.loc[common, col].isna()

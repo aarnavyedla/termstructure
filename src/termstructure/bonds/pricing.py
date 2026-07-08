@@ -1,6 +1,5 @@
 import numpy as np
 from scipy.optimize import brentq
-from typing import List
 
 
 def price_from_ytm(
@@ -21,7 +20,7 @@ def price_from_ytm(
     periods = np.arange(1, n + 1)
     pv_coupons = np.sum(c / (1 + r) ** periods)
     pv_face = face / (1 + r) ** n
-    return pv_coupons + pv_face
+    return float(pv_coupons + pv_face)
 
 
 def ytm_from_price(
@@ -32,8 +31,9 @@ def ytm_from_price(
     face: float = 100.0,
 ) -> float:
     """Yield-to-maturity implied by an observed price, solved via bisection."""
-    objective = lambda y: price_from_ytm(coupon, maturity_years, y, freq, face) - price
-    return brentq(objective, 1e-4, 0.30)
+    def objective(y: float) -> float:
+        return float(price_from_ytm(coupon, maturity_years, y, freq, face) - price)
+    return float(brentq(objective, 1e-4, 0.30))
 
 
 def modified_duration(
@@ -89,7 +89,7 @@ def price_from_curve(
 
 def _tent_bump(
     curve_mats: np.ndarray,
-    bucket_points: List[float],
+    bucket_points: list[float],
     k: int,
     bump: float,
 ) -> np.ndarray:
@@ -98,8 +98,9 @@ def _tent_bump(
     values[k] = 1.0
     left_val  = values[0]   # flat extension left of first bucket
     right_val = values[-1]  # flat extension right of last bucket
-    return bump * np.interp(curve_mats, bucket_points, values,
-                            left=left_val, right=right_val)
+    return np.asarray(
+        bump * np.interp(curve_mats, bucket_points, values, left=left_val, right=right_val)
+    )
 
 
 def key_rate_durations(
@@ -107,11 +108,11 @@ def key_rate_durations(
     maturity_years: float,
     curve_mats: np.ndarray,
     curve_rates: np.ndarray,
-    bucket_points: List[float] = [2, 5, 10, 30],
+    bucket_points: list[float] = [2, 5, 10, 30],
     freq: int = 2,
     face: float = 100.0,
     bump: float = 1e-4,
-) -> dict:
+) -> dict[float, float]:
     """Sensitivity of price (in duration units) to a 1bp tent-function bump at each bucket.
 
     Returns a dict mapping each bucket maturity to its key-rate duration.
@@ -123,8 +124,12 @@ def key_rate_durations(
     krds = {}
     for k, bp in enumerate(bucket_points):
         bump_vec = _tent_bump(curve_mats, bucket_points, k, bump)
-        p_up   = price_from_curve(coupon, maturity_years, curve_mats, curve_rates + bump_vec, freq, face)
-        p_down = price_from_curve(coupon, maturity_years, curve_mats, curve_rates - bump_vec, freq, face)
+        p_up   = price_from_curve(
+            coupon, maturity_years, curve_mats, curve_rates + bump_vec, freq, face
+        )
+        p_down = price_from_curve(
+            coupon, maturity_years, curve_mats, curve_rates - bump_vec, freq, face
+        )
         krds[bp] = (p_down - p_up) / (2 * p * bump)
 
     return krds

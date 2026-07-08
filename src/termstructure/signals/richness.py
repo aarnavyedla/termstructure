@@ -1,6 +1,8 @@
+from pathlib import Path
+from typing import Any
+
 import numpy as np
 import pandas as pd
-from pathlib import Path
 
 from termstructure.curves.svensson import svensson_zero_rate
 from termstructure.pca.panel import DEFAULT_MATURITIES
@@ -44,7 +46,7 @@ def compute_residuals(
     param_cols = ["beta0", "beta1", "beta2", "beta3", "lambda1", "lambda2"]
     param_arr = params.loc[common_dates, param_cols].to_numpy()
 
-    records: list[dict] = []
+    records: list[dict[str, Any]] = []
     for mat in maturities:
         sveny_col = f"sveny{int(mat):02d}"
         obs_pct = bonds.loc[common_dates, sveny_col].to_numpy(dtype=float)
@@ -95,7 +97,11 @@ def compute_residuals(
     _chk["after"] = _chk["residual_bps"] - _chk["mean_residual_bps"]
     _chk["diff"]  = _chk["residual_bps"] - _chk["after"]
     print("\nDemeaning check (5 rows):")
-    print(_chk[["maturity", "residual_bps", "mean_residual_bps", "after", "diff"]].to_string(index=False))
+    print(
+        _chk[["maturity", "residual_bps", "mean_residual_bps", "after", "diff"]].to_string(
+            index=False
+        )
+    )
     print(f"diff == mean_residual_bps: {np.allclose(_chk['diff'], _chk['mean_residual_bps'])}\n")
 
     # Apply: join mean constants then subtract in one explicit step.

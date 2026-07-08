@@ -1,3 +1,5 @@
+from typing import Any
+
 import numpy as np
 import pandas as pd
 from sklearn.decomposition import PCA
@@ -15,7 +17,7 @@ def _sign_corrected_components(raw_components: np.ndarray) -> np.ndarray:
     sklearn eigenvectors are sign-arbitrary; this makes cumulative scores move
     in the same direction as their standard observable proxies.
     """
-    components = raw_components.copy()
+    components: np.ndarray = np.array(raw_components)
     if len(components) > 0 and components[0].mean() < 0:
         components[0] *= -1
     if len(components) > 1 and components[1, -1] < 0:
@@ -25,7 +27,7 @@ def _sign_corrected_components(raw_components: np.ndarray) -> np.ndarray:
     return components
 
 
-def fit_pca(n_components: int | None = None) -> tuple:
+def fit_pca(n_components: int | None = None) -> tuple[Any, np.ndarray, pd.DatetimeIndex]:
     """
     Fit PCA to the daily yield-change panel.
 
@@ -44,6 +46,7 @@ def fit_pca(n_components: int | None = None) -> tuple:
         Saves fitted model to data/processed/pca_model.joblib.
     """
     from pathlib import Path
+
     import joblib
 
     panel_path = Path(__file__).resolve().parents[3] / "data/processed/zero_panel.parquet"
@@ -84,6 +87,7 @@ def compute_factor_scores() -> pd.DataFrame:
         DataFrame with columns: date, score_1, ..., score_N
     """
     from pathlib import Path
+
     import joblib
 
     model_path = Path(__file__).resolve().parents[3] / "data/processed/pca_model.joblib"
@@ -110,7 +114,7 @@ def compute_factor_scores() -> pd.DataFrame:
     return result
 
 
-def save_pca_outputs() -> dict:
+def save_pca_outputs() -> dict[str, Any]:
     """
     Persist PCA outputs to parquet for use in downstream weeks.
 
@@ -128,6 +132,7 @@ def save_pca_outputs() -> dict:
                         n_score_rows, var_3pc
     """
     from pathlib import Path
+
     import joblib
 
     model_path    = Path(__file__).resolve().parents[3] / "data/processed/pca_model.joblib"

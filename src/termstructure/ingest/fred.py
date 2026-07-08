@@ -1,9 +1,10 @@
 """Fetch US Treasury constant-maturity yields from FRED."""
 
 import io
-import requests
-import pandas as pd
 from pathlib import Path
+
+import pandas as pd
+import requests
 
 SERIES = {
     "DGS3MO": 0.25,
@@ -40,7 +41,7 @@ def fetch_fred_yields(start: str, end: str) -> pd.DataFrame:
         DataFrame with columns [date, maturity_years, yield_pct],
         one row per (date, maturity) pair, NaNs dropped.
     """
-    frames = [_fetch_one(sid).loc[start:end] for sid in SERIES]
+    frames = [_fetch_one(sid).loc[start:end] for sid in SERIES]  # type: ignore[misc]
     wide = pd.concat(frames, axis=1)
     wide.index.name = "date"
 

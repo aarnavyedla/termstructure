@@ -1,6 +1,7 @@
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
-from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[3]
 _DATA = _ROOT / "data" / "processed"
@@ -203,7 +204,9 @@ def compute_net_pnl(
     positions = pd.read_parquet(_DATA / "portfolio_positions.parquet")
     positions["date"] = pd.to_datetime(positions["date"])
 
-    gross = compute_portfolio_pnl()[["date", "total_pnl"]].rename(columns={"total_pnl": "gross_pnl"})
+    gross = compute_portfolio_pnl()[["date", "total_pnl"]].rename(
+        columns={"total_pnl": "gross_pnl"}
+    )
     costs = compute_transaction_costs(positions, cost_bps, position_scale)
 
     df = gross.merge(costs, on="date", how="left")
