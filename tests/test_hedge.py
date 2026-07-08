@@ -137,52 +137,128 @@ def test_build_hedge_neutralizes_exposures():
 
 # ─── Regression: stale PCA loadings in hedge construction (Week 7 Day 3 bug) ──
 
-_PCA_LOADINGS = Path("data/processed/pca_loadings.parquet")
+_PCA_LOADINGS  = Path("data/processed/pca_loadings.parquet")
+_POSITIONS     = Path("data/processed/portfolio_positions.parquet")
+_SV_PARAMS     = Path("data/processed/svensson_params.parquet")
+_SIGNAL_PANEL  = Path("data/processed/signal_panel.parquet")
 
-@pytest.mark.skipif(not _PCA_LOADINGS.exists(), reason="pca_loadings.parquet not on disk")
+_requires_portfolio_data = pytest.mark.skipif(
+    not (_PCA_LOADINGS.exists() and _POSITIONS.exists()
+         and _SV_PARAMS.exists() and _SIGNAL_PANEL.exists()),
+    reason="portfolio data files not on disk",
+)
+
+
+@_requires_portfolio_data
 def test_hedge_weights_match_current_loadings() -> None:
-    """_load_pca_loadings() reads live from pca_loadings.parquet with correct shapes.
+    """portfolio_positions.parquet was built with the current pca_loadings.parquet.
 
-    Week 7 Day 3 bug: portfolio_positions.parquet was built with stale PCA loadings
-    that embedded an unintended 2Y/3Y slope bet instead of true factor neutrality.
-    The fix was to rebuild portfolio_positions.parquet using the current loadings.
+    Week 7 Day 3 bug: the PCA was re-run after the portfolio was first built.
+    portfolio_positions.parquet still reflected old loadings that embedded a
+    2Y/3Y slope bet (concentrated hedge weights, ~96% into the 2Y instrument
+    for some positions). The fix was to rebuild portfolio_positions.parquet.
 
-    This regression guards against:
-    (a) hardcoded loadings in _load_pca_loadings()
-    (b) loadings with wrong sign or shape that would re-introduce factor exposure
+    This test picks a specific date (2011-04-28, 7Y long) where both
+    portfolio_positions.parquet and signal_panel.parquet have data, re-runs
+    construct_portfolio with the CURRENT pca_loadings.parquet, and asserts
+    the hedge notionals match to 0.1%.
+
+    If portfolio_positions.parquet were rebuilt with different (stale) loadings,
+    the hedge weights would differ — e.g. the 2Y notional sign would flip and
+    the relative magnitudes across 2Y/5Y/10Y would change materially.
     """
-    from termstructure.backtest.portfolio import _load_pca_loadings
+    from termstructure.backtest.portfolio import (
+        _load_pca_loadings,
+        construct_portfolio,
+    )
+
+    # ── Load all inputs ──────────────────────────────────────────────────────
+    positions = pd.read_parquet(_POSITIONS)
+    positions["date"] = pd.to_datetime(positions["date"])
+
+    params = pd.read_parquet(_SV_PARAMS)
+    params["date"] = pd.to_datetime(params["date"])
+    params = params.set_index("date")
+
+    signal = pd.read_parquet(_SIGNAL_PANEL)
+    signal["date"] = pd.to_datetime(signal["date"])
 
     loadings = _load_pca_loadings()
 
-    # (a) Must match pca_loadings.parquet exactly — no hardcoding, no caching
-    pca_df = pd.read_parquet(_PCA_LOADINGS)
-    expected = pca_df.iloc[:3, 2:].to_numpy()
-    np.testing.assert_array_equal(
-        loadings, expected,
-        err_msg="_load_pca_loadings() does not match pca_loadings.parquet; "
-                "portfolio was built with stale loadings",
+    # ── Sample date: 2011-04-28, 7Y long ────────────────────────────────────
+    # Chosen because it exists in both portfolio_positions.parquet and
+    # signal_panel.parquet (signal panel starts 2010-02-16; positions go back
+    # to 1971 from an earlier build, so only the overlap is re-computable).
+    # Balanced stored weights (2Y -29%, 5Y -38%, 10Y -49%) make sign/magnitude
+    # mismatches unambiguous — stale loadings produced a sign flip on 2Y.
+    target_date = pd.Timestamp("2011-04-28")
+    stored = positions[
+        (positions["date"] == target_date)
+        & (positions["signal_maturity"] == 7)
+        & (positions["direction"] == 1)
+    ]
+    if stored.empty:
+        pytest.skip(f"No 7Y long position on {target_date}; check data files")
+
+    # ── Re-compute the portfolio for that date with current loadings ─────────
+    sv = params.loc[
+        target_date, ["beta0", "beta1", "beta2", "beta3", "lambda1", "lambda2"]
+    ].to_numpy(float)
+    today_sig = signal[signal["date"] == target_date]
+    recomputed = construct_portfolio(target_date, sv, today_sig, loadings)
+
+    recomputed_hedge = recomputed[
+        (recomputed["signal_maturity"] == 7) & (recomputed["leg_type"] == "hedge")
+    ].sort_values("leg_maturity").reset_index(drop=True)
+
+    stored_hedge = stored[stored["leg_type"] == "hedge"].sort_values(
+        "leg_maturity"
+    ).reset_index(drop=True)
+
+    assert not recomputed_hedge.empty, (
+        f"construct_portfolio returned no 7Y hedge legs for {target_date}"
     )
 
-    # (b) PC1 (level): Litterman-Scheinkman predicts a near-flat, single-signed vector.
-    #     If loadings were stale/wrong, PC1 might slope or change sign across maturities.
+    # ── Core assertion: hedge notionals must match to 0.1% ──────────────────
+    # Hedge weights are solved to machine precision from the loading matrix,
+    # so any mismatch here means a different loadings matrix was used during
+    # the portfolio build.  On the pre-rebuild file the 2Y notional had the
+    # WRONG SIGN for this position — that alone causes a >100% relative error.
+    for _, row in recomputed_hedge.iterrows():
+        mat = row["leg_maturity"]
+        stored_notional = stored_hedge.loc[
+            stored_hedge["leg_maturity"] == mat, "notional"
+        ].iloc[0]
+        assert row["notional"] == pytest.approx(stored_notional, rel=1e-3), (
+            f"Hedge notional mismatch at {mat}Y on {target_date}: "
+            f"re-computed={row['notional']:.0f} vs stored={stored_notional:.0f}. "
+            f"portfolio_positions.parquet was built with stale PCA loadings — "
+            f"rebuild with build_portfolio_history()."
+        )
+
+    # ── Shape checks on pca_loadings.parquet itself ──────────────────────────
+    # Catch a corrupt or mis-ordered pca_loadings.parquet (e.g. eigenvectors
+    # in wrong order or with wrong sign convention).
+
+    # PC1 (level): must be single-signed — a parallel shift touches all maturities
+    # with the same sign (Litterman-Scheinkman 1991).
     pc1 = loadings[0]
     assert np.all(pc1 > 0) or np.all(pc1 < 0), (
-        f"PC1 (level) must be single-signed (all > 0 or all < 0); "
-        f"got signs {np.sign(pc1).astype(int).tolist()} — indicates wrong eigenvector"
+        f"PC1 (level) must be single-signed; "
+        f"got signs {np.sign(pc1).astype(int).tolist()}"
     )
 
-    # (c) PC2 (slope): should be monotonically increasing or decreasing.
-    #     A slope factor with a local 2Y/3Y reversal would indicate stale data.
+    # PC2 (slope): must be ≥80% monotonic.  The stale-loadings bug manifested as
+    # a local sign reversal at the 2Y/3Y buckets of the slope eigenvector.
     pc2 = loadings[1]
     diffs = np.diff(pc2)
-    frac_same_sign = max((diffs > 0).mean(), (diffs < 0).mean())
+    frac_same_sign = float(max((diffs > 0).mean(), (diffs < 0).mean()))
     assert frac_same_sign >= 0.80, (
-        f"PC2 (slope) should be ≥80% monotonic; got {frac_same_sign:.0%} — "
-        f"a local 2Y/3Y reversal indicates the stale-loadings bug is back"
+        f"PC2 (slope) should be >=80% monotonic; got {frac_same_sign:.0%} — "
+        "a local 2Y/3Y reversal would indicate the stale-loadings bug is back"
     )
 
-    # (d) PC3 (curvature): midpoint and endpoints should have opposite signs.
+    # PC3 (curvature): interior must have the opposite sign to the endpoints.
     pc3 = loadings[2]
     n = len(pc3)
     endpoint_sign = np.sign((pc3[0] + pc3[-1]) / 2)
