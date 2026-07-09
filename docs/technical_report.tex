@@ -376,6 +376,42 @@ disparities across the curve are smaller, reducing signal opportunities.
 %------------------------------------------------------------------
 \section{Limitations and Future Work}
 
+\subsection{Bugs Found and Fixed During Development}
+
+\paragraph{Flat-day Sharpe inflation (active bug, now fixed).}
+Sharpe must be computed over the full trading calendar, including the $\sim$87\%
+of days the strategy holds no position---otherwise, the standard deviation
+shrinks relative to the mean by a factor of $\sqrt{1/0.135} \approx 2.7\text{--}2.8\times$,
+inflating Sharpe by the same multiple. This was discovered as an active bug
+present in three independent code locations: \texttt{tearsheet.py} and two
+backtest notebooks had each reimplemented the same flawed active-days-only
+filter separately, so all three computed inflated Sharpe figures
+simultaneously. The bug was traced by noticing that the tearsheet Sharpe and
+the notebook Sharpe differed from a manual daily-returns calculation; once the
+shared cause was identified, the three implementations were replaced by a
+single canonical function (\texttt{expand\_to\_full\_calendar} in
+\texttt{termstructure.backtest.pnl}) that reindexes any P\&L series to the
+full zero-panel calendar and fills flat days with zero. All headline Sharpe
+figures in this paper reflect the corrected computation.
+
+\paragraph{Stale-hedge-loadings bug (active bug, now fixed).}
+An early version of the backtest reported a net Sharpe of 0.51---a factor of
+$4.6\times$ higher than the validated 0.11 figure shown in Table~\ref{tab:results}.
+The discrepancy was caused by \texttt{portfolio\_positions.parquet} having been
+built against a stale, pre-refactor version of the PCA loadings. Because the
+eigenvectors used for hedging no longer matched those used for factor scoring,
+the 3Y signal's hedge embedded an unintended short-2Y/long-3Y slope bet
+instead of true factor neutrality. The position was not exposure-neutral; it
+was unknowingly levered to slope. The bug was diagnosed during Week 7 stress
+testing: a $+50$\,bp PC2 (slope) shock produced a large positive P\&L
+residual that should have been near zero for a properly factor-neutral
+portfolio. Once identified, the fix was to regenerate the full 1971--2024
+position history using the current, post-refactor PCA loadings consistently
+throughout. Net Sharpe fell from 0.51 to 0.11 upon correction---the $0.40$
+difference is the slope-bet alpha that was masquerading as RV alpha.
+
+\subsection{Remaining Limitations}
+
 \paragraph{Transaction costs.}
 The headline assumption of 0.02 bp per leg per event is aggressive.
 Total headline costs are $\$807\text{K} - \$314\text{K} = \$493\text{K}$
@@ -390,12 +426,16 @@ Only the 3Y and 7Y maturity buckets are traded. Extending to the full
 1Y--30Y grid would increase diversification, lengthen average holding
 periods (reducing turnover), and improve the signal-to-cost ratio.
 
-\paragraph{Stale hedge weights.}
-Hedge weights are computed at position entry and held fixed until exit.
-As rates move, the PCA exposures of the signal bond change while the hedge
-stays constant, generating drift in factor neutrality. Periodic hedge
-re-solving (e.g., weekly) is the correct fix and would likely improve both
-the rising-rate and steep-curve regime results.
+\paragraph{Stale hedge weights during open positions.}
+Hedge weights are solved at position entry and held fixed until exit.
+As rates move over the holding period, the PCA exposures of the signal bond
+drift while the hedge stays constant, generating residual factor exposure that
+accumulates gradually. This is distinct from the stale-loadings bug above
+(which used the wrong eigenvectors entirely); here the eigenvectors are correct
+but the hedge notionals are not re-optimized as the bond's duration changes.
+Periodic intra-position re-solving (e.g., weekly) is the correct fix and would
+likely reduce the rising-rate and steep-curve Sharpe drag shown in
+Table~\ref{tab:regime}.
 
 \paragraph{Par-zero basis.}
 The z-score residual is $y^{\text{par}} - y^{\text{zero}}(\tau)$, mixing
