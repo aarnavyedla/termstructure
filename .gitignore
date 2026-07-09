@@ -12,3 +12,8 @@ __pycache__/
 *.csv
 CLAUDE.md
 docs/context/
+docs/*.aux
+docs/*.log
+docs/*.out
+docs/*.toc
+docs/*.synctex.gz
