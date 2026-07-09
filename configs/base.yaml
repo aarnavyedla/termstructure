@@ -1,0 +1,36 @@
+# TermStructure pipeline configuration
+# All pipeline stages read from this file via termstructure/run.py
+
+# ── Shared cost assumption ────────────────────────────────────────────────────
+# Consumed identically by run_backtest (compute_net_pnl) and run_report
+# (save_tearsheet). One value here → one number everywhere.
+# 0.02 bp/leg/event = 0.16 bp round-trip for a 4-leg position.
+# This produces the committed headline Sharpe: gross 0.29, net 0.11.
+cost_bps:       0.02
+position_scale: 0.80
+
+# ── Data ─────────────────────────────────────────────────────────────────────
+data:
+  start_date: "1990-01-01"
+  end_date:   "2024-12-31"
+
+# ── Signal ───────────────────────────────────────────────────────────────────
+signal:
+  window:      60    # rolling z-score window (trading days)
+  min_periods: 30    # minimum obs before emitting a z-score
+  entry_z:     2.0   # |z| threshold to open a position
+
+# ── Portfolio ─────────────────────────────────────────────────────────────────
+portfolio:
+  signal_maturities: [3, 7]            # bond maturities tracked for signals (years)
+  hedge_maturities:  [2.0, 5.0, 10.0]  # instruments used to hedge factor exposures
+  target_dv01:       10000.0            # DV01 per signal leg ($)
+  n_per_side:        5                  # max longs and max shorts held simultaneously
+
+# ── PnL / backtest ───────────────────────────────────────────────────────────
+pnl:
+  repo_spread: 0.0005  # financing spread above overnight rate; not yet CLI-configurable
+
+# ── Report ────────────────────────────────────────────────────────────────────
+report:
+  output_path: "outputs/tearsheet.png"

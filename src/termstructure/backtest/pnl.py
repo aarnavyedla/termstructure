@@ -192,11 +192,39 @@ def compute_transaction_costs(
     return daily
 
 
+def expand_to_full_calendar(df: pd.DataFrame) -> pd.DataFrame:
+    """Reindex a daily P&L DataFrame to every trading day in the backtest period.
+
+    Trading days come from zero_panel.parquet (Svensson-curve calendar, Nov 1985 onward).
+    Days with no open position fill to 0.0. This is the single canonical implementation
+    used by compute_net_pnl, the tearsheet, and research notebooks — any change here
+    propagates everywhere and cannot drift silently.
+
+    Args:
+        df: DataFrame with a "date" column and numeric P&L columns.
+
+    Returns:
+        Same DataFrame reindexed to all zero-panel dates ≤ df["date"].max(),
+        missing dates filled with 0.0.
+    """
+    zp = pd.read_parquet(_DATA / "zero_panel.parquet", columns=["date"])
+    all_dates = pd.to_datetime(zp["date"]).drop_duplicates().sort_values()
+    all_dates = all_dates[all_dates <= df["date"].max()]
+    return (
+        df.set_index("date")
+        .reindex(all_dates, fill_value=0.0)
+        .reset_index()
+    )
+
+
 def compute_net_pnl(
     position_scale: float = POSITION_SCALE,
     cost_bps: float = COST_BPS,
 ) -> pd.DataFrame:
     """Gross P&L scaled by position_scale minus transaction costs.
+
+    Expands to the full zero-panel trading calendar (via expand_to_full_calendar)
+    so that flat/no-position days are included in the Sharpe denominator.
 
     Returns DataFrame with columns:
         date, gross_pnl, scaled_pnl, transaction_cost, net_pnl, cumulative_net_pnl
@@ -213,6 +241,8 @@ def compute_net_pnl(
     df["transaction_cost"] = df["transaction_cost"].fillna(0.0)
     df["scaled_pnl"] = df["gross_pnl"] * position_scale
     df["net_pnl"] = df["scaled_pnl"] - df["transaction_cost"]
+
+    df = expand_to_full_calendar(df)
     df["cumulative_net_pnl"] = df["net_pnl"].cumsum()
 
     return df.sort_values("date").reset_index(drop=True)

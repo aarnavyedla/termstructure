@@ -6,6 +6,9 @@ build-backend = "setuptools.build_meta"
 name = "termstructure"
 version = "0.1.0"
 requires-python = ">=3.10"
+dependencies = [
+    "pyyaml>=6.0",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -27,3 +30,7 @@ warn_return_any = true
 module = ["sklearn.*", "joblib.*"]
 ignore_missing_imports = true
 ignore_errors = false
+
+[[tool.mypy.overrides]]
+module = ["yaml"]
+ignore_missing_imports = true

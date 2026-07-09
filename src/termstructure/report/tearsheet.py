@@ -14,6 +14,7 @@ from termstructure.backtest.pnl import (
     compute_leg_pnl,
     compute_portfolio_pnl,
     compute_transaction_costs,
+    expand_to_full_calendar,
 )
 
 _DATA = Path(__file__).resolve().parents[3] / "data" / "processed"
@@ -76,23 +77,6 @@ def compute_stats(
     }
 
 
-def _expand_to_full_calendar(merged: pd.DataFrame) -> pd.DataFrame:
-    """Reindex a daily P&L DataFrame to every trading day in the backtest period.
-
-    Trading days are sourced from zero_panel.parquet (the Svensson-curve calendar,
-    starting Nov 1985). Days with no open position fill to 0. This is required so
-    Sharpe is not inflated by excluding the ~86% of trading days when the strategy
-    holds no position.
-    """
-    zp = pd.read_parquet(_DATA / "zero_panel.parquet", columns=["date"])
-    all_dates = pd.to_datetime(zp["date"]).drop_duplicates().sort_values()
-    all_dates = all_dates[all_dates <= merged["date"].max()]
-    return (
-        merged.set_index("date")
-        .reindex(all_dates, fill_value=0.0)
-        .reset_index()
-    )
-
 
 def print_stats_table(
     cost_bps: float = DEFAULT_COST_BPS,
@@ -122,7 +106,7 @@ def print_stats_table(
 
     # Expand to full trading calendar before computing stats so that flat/no-position
     # days (zero P&L) are included in the Sharpe denominator.
-    merged = _expand_to_full_calendar(merged)
+    merged = expand_to_full_calendar(merged)
 
     s_gross  = compute_stats(merged.set_index("date")["total_pnl"],    "Gross",  n_years)
     s_scaled = compute_stats(
@@ -213,7 +197,7 @@ def plot_tearsheet(
     merged["scaled_pnl"] = merged["total_pnl"] * position_scale
     merged["net_pnl"]    = merged["scaled_pnl"] - merged["_tc"]
     # Expand to full trading calendar so Sharpe and rolling Sharpe include flat days.
-    merged = _expand_to_full_calendar(merged)
+    merged = expand_to_full_calendar(merged)
     merged["cum_gross"]  = merged["scaled_pnl"].cumsum()
     merged["cum_net"]    = merged["net_pnl"].cumsum()
 
