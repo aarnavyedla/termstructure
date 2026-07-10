@@ -10,6 +10,15 @@ dependencies = [
     "pyyaml>=6.0",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "mypy>=1.8",
+    "pytest>=7",
+    "pytest-cov>=4",
+    "ruff>=0.3",
+    "types-requests",
+]
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
