@@ -44,3 +44,7 @@ ignore_errors = false
 [[tool.mypy.overrides]]
 module = ["yaml"]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["termstructure.ingest.fred", "termstructure.curves.svensson"]
+warn_unused_ignores = false
