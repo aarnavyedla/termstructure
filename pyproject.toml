@@ -17,6 +17,7 @@ dev = [
     "pytest-cov>=4",
     "ruff>=0.3",
     "types-requests",
+    "pandas",
 ]
 
 [tool.setuptools.packages.find]
